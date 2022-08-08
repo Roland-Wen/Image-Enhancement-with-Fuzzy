@@ -15,6 +15,7 @@ from fuzzylogic.functions import R, S, triangular
 
 def FCF(image, N):
     def muMore(z, alpha, beta):
+        assert 0.0 <= z <= 1.0, f"z = {z} which is out of bound for muMore"
         return 1 / (1 + np.exp(-alpha * z + beta))
     
     def getLambdas(block, fuzzySets):
@@ -28,11 +29,11 @@ def FCF(image, N):
             minMu, cnt = 10000.0, 0
             for i in range(N):
                 for j in range(N):
+                    if (i, j) == (N//2, N//2): continue
                     curr = fuzzySets[rule](block[i][j] - middle)
                     if curr > 0.0:
                         minMu = min(minMu, curr)
                         cnt += 1
-                        
             if minMu > 1.1: minMu = 0
             lambdas[rule] = minMu * muMore(cnt / (N * N), alpha1, beta1)
         
@@ -58,21 +59,23 @@ def FCF(image, N):
                     diff.PS, diff.PM, diff.PB]
     center = [0, base + delta * 1, base + delta * 2, base + delta * 3, 
               base + delta * 5, base + delta * 6, base + delta * 7]
+        
     # for fuzzy in diffFuzzySet:
     #     fuzzy.plot()
     
+    ans = image.copy()
     # calculate lambdas and y
     for i in range(1, H-1):
         for j in range(1, W-1):
             lambdas = getLambdas(image[i-1: i+2, j-1: j+2], diffFuzzySet)
             y = int(sum(lambdas[k] * center[k] for k in range(len(center))))
-            image[i, j] += y
+            ans[i, j] += y
             assert 0 <= image[i,j] <= 256, "resulting pixel out of bound"
-    
-    return image
+
+    return ans
     
 if __name__ == '__main__':
-    image = cv2.imread('bird.png', 0)
+    image = cv2.imread('lenaNoise.png', 0)
     plt.imshow(image, cmap = 'gray', vmin = 0, vmax = 256)
     
     result = FCF(image, 3)
