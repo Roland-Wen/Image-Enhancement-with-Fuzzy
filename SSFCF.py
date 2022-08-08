@@ -14,31 +14,55 @@ from statistics import median
 # date-released: 2022-02-15
 # url: "https://github.com/amogorkon/fuzzylogic"
 
-def SFCF(image, N):
+def SSFCF(image, N, SC):
+    assert N % 2 == 1, "N must be an odd number"
+    
     def muMore(z, alpha, beta):
         assert 0.0 <= z <= 1.0, f"z = {z} which is out of bound for muMore"
         return 1 / (1 + np.exp(-alpha * z + beta))
     
-    def getLambdas(block, fuzzySets):
+    def getLambdas(block, fuzzySets, numOfRule = 9):
         assert block.shape == (N, N), "wrong shape to get lambdas"
         
         middle = int(block[N//2, N//2])
-        numOfRule = len(fuzzySets)
         lambdas = [0] * numOfRule
         
-        for rule in range(1, numOfRule):
+        # lambdas for NB~PB
+        for rule in range(1, 7):
             members = []
             for i in range(N):
                 for j in range(N):
                     if (i, j) == (N//2, N//2): continue
+                
                     curr = fuzzySets[rule](block[i][j] - middle)
                     if curr > 0.0: members.append(curr)
+                    
             cnt = len(members)
             if cnt > 0:
                 medianMu = median(members)
             else:
                 medianMu = 0
-            lambdas[rule] = medianMu * muMore(cnt / (N * N), alpha1, beta1)
+            lambdas[rule] = medianMu * muMore(cnt / (N * N - 1), alpha1, beta1)
+        
+        # lambdas for R'1 and R'2
+        for rule in range(7, 9):
+            numZbigger, numAbigger, minMuA = 0, 0, 1000.0
+            for i in range(N):
+                for j in range(N):
+                    if (i, j) == (N//2, N//2): continue
+                
+                    xi = block[i][j] - middle
+                    muA = fuzzySets[rule](xi)
+                    muZ = fuzzySets[0](xi)
+                    
+                    if muA > muZ:
+                        minMuA = min(minMuA, muA)
+                        numAbigger += 1
+                    elif muZ > muA:
+                        numZbigger += 1
+                        
+            if minMuA > 2.0: minMuA = 0
+            lambdas[rule] = minMuA * muMore(numZbigger / (N * N - 1), alpha1, beta1) * muMore(numAbigger / (N * N), alpha3, beta3)
         
         return lambdas
     
@@ -59,6 +83,7 @@ def SFCF(image, N):
     base, delta = -256, 512//8
     alpha1, beta1 = 13, 7
     alpha2, beta2 = 7, 3
+    alpha3, beta3 = 15, 3
     H, W = image.shape
     
     # construct membership functions
@@ -70,11 +95,19 @@ def SFCF(image, N):
     diff.PS = triangular(base + delta * 4, base + delta * 6)
     diff.PM = triangular(base + delta * 5, base + delta * 7)
     diff.PB =          R(base + delta * 6, base + delta * 7)
+    diff.A1 =          R(               0,              256)
+    diff.A2 =          S(            -256,                0)
+    diff.B1 =          S(            -256, base + delta * 1)
+    diff.B2 =          R(base + delta * 7,              256)
+    
     diffFuzzySet = [diff.Z, diff.NB, diff.NM, diff.NS, 
-                    diff.PS, diff.PM, diff.PB]
+                    diff.PS, diff.PM, diff.PB,
+                    diff.A1, diff.A2, diff.B1, diff.B2]
     center = [0, base + delta * 1, base + delta * 2, base + delta * 3, 
-              base + delta * 5, base + delta * 6, base + delta * 7]
-        
+              base + delta * 5, base + delta * 6, base + delta * 7, 256,
+              -256, -256, 256]
+    
+    # plt.figure()
     # for fuzzy in diffFuzzySet:
     #     fuzzy.plot()
     
@@ -82,30 +115,37 @@ def SFCF(image, N):
     # calculate lambdas and y
     for i in range(1, H-1):
         for j in range(1, W-1):
-            lambdas = getLambdas(image[i-1:i+2, j-1:j+2], diffFuzzySet)
-            currAvg, k = avg(image[i-1:i+2, j-1:j+2], diff.Z)
-            k = muMore(k / (N * N), alpha2, beta2)
+            currBlock = image[i-N//2:i+N//2+1, j-N//2:j+N//2+1]
+            lambdas = getLambdas(currBlock, diffFuzzySet)
+            currAvg, k = avg(currBlock, diff.Z)
+            k = muMore(k / (N * N - 1), alpha2, beta2)
             y = k * currAvg
-            y += (1 - k) * sum(
-                lambdas[l] * center[l] for l in range(len(center)))
+            y += (1 - k) * (
+                     sum(lambdas[l] * center[l]     for l in range(1, 7)) +
+                SC * sum(lambdas[l] * center[l + 2] for l in range(7, 9)))
             ans[i, j] += int(y)
-            assert 0 <= ans[i,j] <= 256, f"resulting pixel out of bound:ans[{i}][{j}]={ans[i][j]}"
-
+            ans[i, j] = max(0, min(ans[i, j], 255))
+            # if not 0 <= ans[i, j] <= 256:
+            #     print(f"resulting pixel out of bound:ans[{i}][{j}]={ans[i][j]}")
+            #     print(f"y={y}")
+            #     print(f"lambdas={lambdas}")
+            #     print(f"k={k}")
+            #     print((1-k)*SC * lambdas[7] * center[7 + 2])
+            #     assert False
+                
     return ans
     
 if __name__ == '__main__':
     image = cv2.imread('lenaNoise.png', 0)
-    # image = np.array([[0, 0, 0],
-    #                   [0, 30, 0],
-    #                   [0, 0, 0]])
-    # row, col = image.shape
-    # gauss = np.random.normal(0,20,(row,col))
-    # gauss = gauss.reshape(row,col)
-    # image += np.int32(gauss)
+    # image = np.array([[0, 128, 0 ,0],
+    #                   [0, 128, 0, 0],
+    #                   [0, 128, 0, 0],
+    #                   [0, 128, 0 ,0]])
+    plt.figure()
     plt.imshow(image, cmap = 'gray', vmin = 0, vmax = 256)
     
-    result = SFCF(image, 3)
+    result = SSFCF(image, 3, 1)
     
     plt.figure()
     plt.imshow(result, cmap = 'gray', vmin = 0, vmax = 256)
-    cv2.imwrite('SFCF_lenaSNP.png', result)
+    cv2.imwrite('SSFCF_lenaNoise.png', result)
